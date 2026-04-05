@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Products — InvenAI</title>
+  <link rel="stylesheet" href="../assets/css/style.css"/>
+</head>
+<body>
+
+<div class="app-layout" id="app">
+  <main class="main-content">
+    <div class="page-header flex justify-between items-center">
+      <div>
+        <h1 class="page-title">Products</h1>
+        <p class="page-subtitle">Manage your inventory items</p>
+      </div>
+      <button class="btn-primary" onclick="openModal()">+ Add Product</button>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="search-input-wrap">
+        <span class="icon">⌕</span>
+        <input id="searchInput" type="text" class="form-control" placeholder="Search products…"/>
+      </div>
+      <select id="catFilter" class="form-control" style="max-width:180px;">
+        <option value="all">All Categories</option>
+      </select>
+    </div>
+
+    <!-- Products Table -->
+    <div class="card">
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>Category</th>
+              <th>Price</th>
+              <th>Quantity</th>
+              <th>Stock Value</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="productsBody">
+            <tr><td colspan="8" class="text-muted" style="text-align:center;padding:2rem;">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Add / Edit Product Modal -->
+<div class="modal-overlay" id="productModal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title" id="modalTitle">Add Product</span>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <input type="hidden" id="editId"/>
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">Product Name *</label>
+        <input id="pName" type="text" class="form-control" placeholder="e.g. Laptop Pro"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Category *</label>
+        <input id="pCategory" type="text" class="form-control" placeholder="e.g. Electronics"/>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">Price ($) *</label>
+        <input id="pPrice" type="number" min="0" step="0.01" class="form-control" placeholder="0.00"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Initial Quantity *</label>
+        <input id="pQty" type="number" min="0" class="form-control" placeholder="0"/>
+      </div>
+    </div>
+    <div class="flex gap-2" style="justify-content:flex-end;margin-top:0.5rem;">
+      <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="saveProduct()">Save Product</button>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/sidebar.js"></script>
+<script src="../assets/js/search.js"></script>
+<script src="../assets/js/toast.js"></script>
+<script>
+  initPage('products');
+
+  let allProducts = [];
+
+  function escHtml(str) {
+    return String(str).replace(/[&<>"']/g, c =>
+      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
+  async function loadProducts() {
+    try {
+      const data = await ProductAPI.getAll();
+      allProducts = data.products || [];
+      renderTable(allProducts);
+      populateCategoryFilter('productsBody', 'catFilter', 2);
+      initTableSearch({ inputId: 'searchInput', selectId: 'catFilter', tableId: 'productsBody', cols: [1, 2], catCol: 2 });
+    } catch (err) {
+      showToast('Failed to load products: ' + err.message, 'error');
+    }
+  }
+
+  function renderTable(products) {
+    const tbody = document.getElementById('productsBody');
+    if (!products.length) {
+      tbody.innerHTML = '<tr><td colspan="8" class="text-muted" style="text-align:center;padding:2rem;">No products found</td></tr>';
+      return;
+    }
+    tbody.innerHTML = products.map(p => {
+      const stockVal = (parseFloat(p.price) * p.quantity).toFixed(2);
+      const status = p.quantity === 0 ? '<span class="badge badge-out">Out</span>'
+                   : p.quantity < 10  ? '<span class="badge badge-low">Low</span>'
+                   : '<span class="badge badge-in">OK</span>';
+      return `
+        <tr>
+          <td class="mono text-muted">${p.id}</td>
+          <td><strong>${escHtml(p.name)}</strong></td>
+          <td><span class="badge badge-cat">${escHtml(p.category)}</span></td>
+          <td class="mono">$${parseFloat(p.price).toFixed(2)}</td>
+          <td class="mono ${p.quantity < 10 ? 'text-warning' : ''}">${p.quantity}</td>
+          <td class="mono text-accent">$${stockVal}</td>
+          <td>${status}</td>
+          <td>
+            <button class="btn-edit btn-sm" onclick="openModal(${p.id})">Edit</button>
+            <button class="btn-danger btn-sm" onclick="deleteProduct(${p.id}, '${escHtml(p.name)}')">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function openModal(id) {
+    document.getElementById('editId').value = id || '';
+    document.getElementById('modalTitle').textContent = id ? 'Edit Product' : 'Add Product';
+
+    if (id) {
+      const p = allProducts.find(x => x.id === id);
+      if (p) {
+        document.getElementById('pName').value     = p.name;
+        document.getElementById('pCategory').value = p.category;
+        document.getElementById('pPrice').value    = p.price;
+        document.getElementById('pQty').value      = p.quantity;
+      }
+    } else {
+      document.getElementById('pName').value = '';
+      document.getElementById('pCategory').value = '';
+      document.getElementById('pPrice').value = '';
+      document.getElementById('pQty').value = '';
+    }
+    document.getElementById('productModal').classList.add('show');
+  }
+
+  function closeModal() {
+    document.getElementById('productModal').classList.remove('show');
+  }
+
+  async function saveProduct() {
+    const id   = document.getElementById('editId').value;
+    const data = {
+      name:     document.getElementById('pName').value.trim(),
+      category: document.getElementById('pCategory').value.trim(),
+      price:    parseFloat(document.getElementById('pPrice').value),
+      quantity: parseInt(document.getElementById('pQty').value),
+    };
+
+    if (!data.name || !data.category || isNaN(data.price) || isNaN(data.quantity)) {
+      showToast('Please fill in all fields correctly', 'error');
+      return;
+    }
+
+    try {
+      if (id) {
+        await ProductAPI.update(id, data);
+        showToast('Product updated successfully');
+      } else {
+        await ProductAPI.create(data);
+        showToast('Product created successfully');
+      }
+      closeModal();
+      loadProducts();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  async function deleteProduct(id, name) {
+    if (!confirm(`Delete "${name}"? This will also remove all related transactions.`)) return;
+    try {
+      await ProductAPI.delete(id);
+      showToast('Product deleted');
+      loadProducts();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  // Close modal on overlay click
+  document.getElementById('productModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
+
+  loadProducts();
+</script>
+</body>
+</html>

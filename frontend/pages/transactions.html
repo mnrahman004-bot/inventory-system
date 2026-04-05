@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Transactions — InvenAI</title>
+  <link rel="stylesheet" href="../assets/css/style.css"/>
+</head>
+<body>
+
+<div class="app-layout" id="app">
+  <main class="main-content">
+    <div class="page-header flex justify-between items-center">
+      <div>
+        <h1 class="page-title">Transactions</h1>
+        <p class="page-subtitle">Stock IN / OUT history</p>
+      </div>
+      <button class="btn-primary" onclick="openTxModal()">+ New Transaction</button>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="search-input-wrap">
+        <span class="icon">⌕</span>
+        <input id="searchInput" type="text" class="form-control" placeholder="Search by product…"/>
+      </div>
+      <select id="typeFilter" class="form-control" style="max-width:160px;">
+        <option value="all">All Types</option>
+        <option value="IN">IN</option>
+        <option value="OUT">OUT</option>
+      </select>
+    </div>
+
+    <!-- Transactions Table -->
+    <div class="card">
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Product</th>
+              <th>Type</th>
+              <th>Quantity</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody id="txBody">
+            <tr><td colspan="5" class="text-muted" style="text-align:center;padding:2rem;">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- New Transaction Modal -->
+<div class="modal-overlay" id="txModal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title">New Transaction</span>
+      <button class="modal-close" onclick="closeTxModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Product *</label>
+      <select id="txProduct" class="form-control">
+        <option value="">Select a product…</option>
+      </select>
+    </div>
+
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">Type *</label>
+        <select id="txType" class="form-control">
+          <option value="IN">IN — Add Stock</option>
+          <option value="OUT">OUT — Remove Stock</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Quantity *</label>
+        <input id="txQty" type="number" min="1" class="form-control" placeholder="0"/>
+      </div>
+    </div>
+
+    <!-- Current stock hint -->
+    <div id="stockHint" style="display:none;margin-bottom:1rem;" class="text-muted" style="font-size:0.82rem;font-family:var(--font-mono);"></div>
+
+    <div class="flex gap-2" style="justify-content:flex-end;">
+      <button class="btn-outline" onclick="closeTxModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitTransaction()">Submit</button>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/sidebar.js"></script>
+<script src="../assets/js/search.js"></script>
+<script src="../assets/js/toast.js"></script>
+<script>
+  initPage('transactions');
+
+  let allProducts = [];
+
+  function escHtml(str) {
+    return String(str).replace(/[&<>"']/g, c =>
+      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
+  async function loadTransactions() {
+    try {
+      const data = await TransactionAPI.getAll();
+      renderTable(data.transactions || []);
+    } catch (err) {
+      showToast('Failed to load transactions: ' + err.message, 'error');
+    }
+  }
+
+  function renderTable(txList) {
+    const tbody = document.getElementById('txBody');
+    if (!txList.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:2rem;">No transactions yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = txList.map(t => `
+      <tr>
+        <td class="mono text-muted">${t.id}</td>
+        <td><strong>${escHtml(t.product_name || '')}</strong></td>
+        <td>
+          <span class="badge ${t.type === 'IN' ? 'badge-in' : 'badge-out'}">${t.type}</span>
+        </td>
+        <td class="mono ${t.type === 'IN' ? 'text-success' : 'text-danger'}">
+          ${t.type === 'IN' ? '+' : '-'}${t.quantity}
+        </td>
+        <td class="mono text-muted">${formatDate(t.date)}</td>
+      </tr>
+    `).join('');
+
+    // Wire up type filter
+    initTableSearch({
+      inputId: 'searchInput', selectId: 'typeFilter',
+      tableId: 'txBody', cols: [1], catCol: 2
+    });
+  }
+
+  // Custom type filter (col 2 contains badge text IN/OUT)
+  document.getElementById('typeFilter').addEventListener('change', function() {
+    const q   = document.getElementById('searchInput').value;
+    const val = this.value;
+    filterTable('txBody', q, val, [1], 2);
+  });
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '—';
+    return new Date(dateStr).toLocaleString();
+  }
+
+  async function openTxModal() {
+    // Load products into select
+    try {
+      if (!allProducts.length) {
+        const data = await ProductAPI.getAll();
+        allProducts = data.products || [];
+      }
+      const sel = document.getElementById('txProduct');
+      sel.innerHTML = '<option value="">Select a product…</option>' +
+        allProducts.map(p => `<option value="${p.id}" data-qty="${p.quantity}">
+          ${escHtml(p.name)} (Stock: ${p.quantity})</option>`).join('');
+    } catch (e) {}
+
+    document.getElementById('txModal').classList.add('show');
+  }
+
+  function closeTxModal() {
+    document.getElementById('txModal').classList.remove('show');
+    document.getElementById('stockHint').style.display = 'none';
+  }
+
+  // Show current stock hint when product selected
+  document.getElementById('txProduct').addEventListener('change', function() {
+    const opt = this.selectedOptions[0];
+    const qty = opt ? opt.getAttribute('data-qty') : null;
+    const hint = document.getElementById('stockHint');
+    if (qty !== null && this.value) {
+      hint.textContent = `Current stock: ${qty} units`;
+      hint.style.display = 'block';
+    } else {
+      hint.style.display = 'none';
+    }
+  });
+
+  async function submitTransaction() {
+    const product_id = parseInt(document.getElementById('txProduct').value);
+    const type       = document.getElementById('txType').value;
+    const quantity   = parseInt(document.getElementById('txQty').value);
+
+    if (!product_id || !quantity || quantity < 1) {
+      showToast('Please fill in all fields', 'error');
+      return;
+    }
+
+    try {
+      const res = await TransactionAPI.create({ product_id, type, quantity });
+      showToast(`Transaction recorded. New stock: ${res.new_quantity}`);
+      closeTxModal();
+      allProducts = []; // force refresh
+      loadTransactions();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  document.getElementById('txModal').addEventListener('click', function(e) {
+    if (e.target === this) closeTxModal();
+  });
+
+  loadTransactions();
+</script>
+</body>
+</html>

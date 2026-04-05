@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dashboard — InvenAI</title>
+  <link rel="stylesheet" href="../assets/css/style.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="app-layout" id="app">
+  <!-- Sidebar injected by sidebar.js -->
+  <main class="main-content">
+    <div class="page-header">
+      <h1 class="page-title">Dashboard</h1>
+      <p class="page-subtitle">Real-time inventory overview</p>
+    </div>
+
+    <!-- Stat Cards -->
+    <div class="grid-4 mb-3" id="statsRow">
+      <div class="card stat-card accent">
+        <div class="stat-label">Total Products</div>
+        <div class="stat-value" id="statProducts">—</div>
+        <div class="stat-sub">SKUs tracked</div>
+      </div>
+      <div class="card stat-card success">
+        <div class="stat-label">Stock Value</div>
+        <div class="stat-value" id="statValue">—</div>
+        <div class="stat-sub">Total inventory worth</div>
+      </div>
+      <div class="card stat-card warning">
+        <div class="stat-label">Low Stock</div>
+        <div class="stat-value" id="statLow">—</div>
+        <div class="stat-sub">Items below 10 units</div>
+      </div>
+      <div class="card stat-card danger">
+        <div class="stat-label">Out of Stock</div>
+        <div class="stat-value" id="statOut">—</div>
+        <div class="stat-sub">Needs reorder</div>
+      </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="grid-2 mb-3">
+      <div class="card">
+        <div class="flex justify-between items-center mb-2">
+          <h3 style="font-size:0.95rem;font-weight:700;">Sales vs Purchases</h3>
+          <span class="text-muted" style="font-size:0.75rem;font-family:var(--font-mono);">Last 14 days</span>
+        </div>
+        <canvas id="salesChart" height="180"></canvas>
+      </div>
+      <div class="card">
+        <div class="flex justify-between items-center mb-2">
+          <h3 style="font-size:0.95rem;font-weight:700;">Category Distribution</h3>
+          <span class="text-muted" style="font-size:0.75rem;font-family:var(--font-mono);">By quantity</span>
+        </div>
+        <canvas id="categoryChart" height="180"></canvas>
+      </div>
+    </div>
+
+    <!-- Low Stock Alert Table -->
+    <div class="card">
+      <div class="flex justify-between items-center mb-2">
+        <h3 style="font-size:0.95rem;font-weight:700;">⚠ Low Stock Alert</h3>
+        <a href="products.html" class="btn-outline btn-sm">View All</a>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Category</th>
+              <th>Price</th>
+              <th>Quantity</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="lowStockBody">
+            <tr><td colspan="5" class="text-muted" style="text-align:center;padding:1.5rem;">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/sidebar.js"></script>
+<script src="../assets/js/charts.js"></script>
+<script src="../assets/js/toast.js"></script>
+<script>
+  initPage('dashboard');
+
+  async function loadDashboard() {
+    try {
+      // Load stats + category data
+      const dash = await DashboardAPI.getStats();
+      const s = dash.stats;
+
+      document.getElementById('statProducts').textContent = s.total_products || 0;
+      document.getElementById('statValue').textContent =
+        '$' + parseFloat(s.total_stock_value || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+      document.getElementById('statLow').textContent = s.low_stock_count || 0;
+
+      // Category chart
+      if (dash.category_distribution?.length) {
+        renderCategoryChart('categoryChart', dash.category_distribution);
+      }
+
+      // Load products for low stock table + out of stock count
+      const prods = await ProductAPI.getAll();
+      const all = prods.products || [];
+      const outOfStock = all.filter(p => p.quantity === 0).length;
+      const lowStock   = all.filter(p => p.quantity > 0 && p.quantity < 10);
+
+      document.getElementById('statOut').textContent = outOfStock;
+
+      // Low stock table
+      const tbody = document.getElementById('lowStockBody');
+      if (!lowStock.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:1.5rem;">✓ All items have sufficient stock</td></tr>';
+      } else {
+        tbody.innerHTML = lowStock.map(p => `
+          <tr>
+            <td><strong>${escHtml(p.name)}</strong></td>
+            <td><span class="badge badge-cat">${escHtml(p.category)}</span></td>
+            <td class="mono">$${parseFloat(p.price).toFixed(2)}</td>
+            <td class="text-warning mono">${p.quantity}</td>
+            <td><span class="badge badge-low">Low Stock</span></td>
+          </tr>
+        `).join('');
+      }
+
+      // Load chart data
+      const chartResp = await TransactionAPI.chart();
+      if (chartResp.data?.length) {
+        renderSalesPurchasesChart('salesChart', chartResp.data);
+      }
+
+    } catch (err) {
+      showToast('Failed to load dashboard: ' + err.message, 'error');
+    }
+  }
+
+  function escHtml(str) {
+    return String(str).replace(/[&<>"']/g, c =>
+      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
+  loadDashboard();
+</script>
+</body>
+</html>

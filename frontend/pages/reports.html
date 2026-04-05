@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Reports — InvenAI</title>
+  <link rel="stylesheet" href="../assets/css/style.css"/>
+</head>
+<body>
+
+<div class="app-layout" id="app">
+  <main class="main-content">
+    <div class="page-header">
+      <h1 class="page-title">Reports &amp; AI Prediction</h1>
+      <p class="page-subtitle">Export data and forecast demand</p>
+    </div>
+
+    <div class="grid-2">
+      <!-- CSV Export Section -->
+      <div class="card">
+        <h3 style="font-size:1rem;font-weight:700;margin-bottom:0.5rem;">📥 Export Reports</h3>
+        <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1.25rem;">
+          Download inventory and transaction data as CSV files.
+        </p>
+        <div style="display:flex;flex-direction:column;gap:0.75rem;">
+          <div style="display:flex;align-items:center;justify-content:space-between;
+            background:var(--surface2);border-radius:8px;padding:1rem;">
+            <div>
+              <div style="font-weight:600;font-size:0.9rem;">Products Report</div>
+              <div class="mono text-muted" style="font-size:0.75rem;">All products with stock values</div>
+            </div>
+            <button class="btn-primary btn-sm" onclick="exportCSV('products')">Export CSV</button>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;
+            background:var(--surface2);border-radius:8px;padding:1rem;">
+            <div>
+              <div style="font-weight:600;font-size:0.9rem;">Transactions Report</div>
+              <div class="mono text-muted" style="font-size:0.75rem;">Full IN/OUT history</div>
+            </div>
+            <button class="btn-primary btn-sm" onclick="exportCSV('transactions')">Export CSV</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Prediction Section -->
+      <div class="card">
+        <h3 style="font-size:1rem;font-weight:700;margin-bottom:0.5rem;">🤖 AI Demand Prediction</h3>
+        <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1.25rem;">
+          Uses Linear Regression to predict future stock demand based on transaction history.
+        </p>
+
+        <div class="form-group">
+          <label class="form-label">Select Product</label>
+          <select id="predProduct" class="form-control">
+            <option value="">Loading products…</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Forecast Horizon (days)</label>
+          <select id="predDays" class="form-control">
+            <option value="7">7 days</option>
+            <option value="14">14 days</option>
+            <option value="30" selected>30 days</option>
+            <option value="60">60 days</option>
+            <option value="90">90 days</option>
+          </select>
+        </div>
+
+        <button class="btn-primary w-full" style="justify-content:center;" onclick="runPrediction()">
+          Run Prediction
+        </button>
+
+        <!-- Prediction Results -->
+        <div id="predResult" class="prediction-box mt-2">
+          <div class="pred-metric">
+            <span class="pred-key">Product</span>
+            <span class="pred-val" id="predName">—</span>
+          </div>
+          <div class="pred-metric">
+            <span class="pred-key">Current Stock</span>
+            <span class="pred-val mono" id="predStock">—</span>
+          </div>
+          <div class="pred-metric">
+            <span class="pred-key">Predicted Demand</span>
+            <span class="pred-val text-accent mono" id="predQty">—</span>
+          </div>
+          <div class="pred-metric">
+            <span class="pred-key">Trend</span>
+            <span class="pred-val" id="predTrend">—</span>
+          </div>
+          <div class="pred-metric">
+            <span class="pred-key">Model Confidence (R²)</span>
+            <span class="pred-val mono" id="predConf">—</span>
+          </div>
+          <div class="pred-metric">
+            <span class="pred-key">Data Points</span>
+            <span class="pred-val mono" id="predPoints">—</span>
+          </div>
+          <div id="predMsg" style="margin-top:0.75rem;padding:0.6rem;background:rgba(245,158,11,0.1);
+            border:1px solid rgba(245,158,11,0.2);border-radius:6px;font-size:0.8rem;color:var(--warning);display:none;">
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/api.js"></script>
+<script src="../assets/js/sidebar.js"></script>
+<script src="../assets/js/toast.js"></script>
+<script>
+  initPage('reports');
+
+  async function loadProducts() {
+    try {
+      const data = await ProductAPI.getAll();
+      const sel = document.getElementById('predProduct');
+      sel.innerHTML = '<option value="">Select a product…</option>' +
+        (data.products || []).map(p =>
+          `<option value="${p.id}">${p.name} (Stock: ${p.quantity})</option>`
+        ).join('');
+    } catch (err) {
+      showToast('Failed to load products', 'error');
+    }
+  }
+
+  async function exportCSV(type) {
+    try {
+      await ReportAPI.exportCSV(type);
+      showToast(`${type} report downloaded`);
+    } catch (err) {
+      showToast('Export failed: ' + err.message, 'error');
+    }
+  }
+
+  async function runPrediction() {
+    const productId = document.getElementById('predProduct').value;
+    const days      = document.getElementById('predDays').value;
+
+    if (!productId) {
+      showToast('Please select a product', 'error');
+      return;
+    }
+
+    try {
+      const res = await PredictionAPI.predict(productId, days);
+      const p   = res.prediction;
+
+      document.getElementById('predResult').classList.add('show');
+      document.getElementById('predName').textContent  = res.product_name;
+      document.getElementById('predStock').textContent = res.current_stock + ' units';
+      document.getElementById('predQty').textContent   = p.predicted_quantity + ' units';
+
+      // Trend badge
+      const trendMap = {
+        increasing: '<span class="badge badge-in">↑ Increasing</span>',
+        decreasing: '<span class="badge badge-out">↓ Decreasing</span>',
+        stable:     '<span class="badge badge-stable">→ Stable</span>'
+      };
+      document.getElementById('predTrend').innerHTML = trendMap[p.trend] || p.trend;
+      document.getElementById('predConf').textContent   = (p.confidence * 100).toFixed(1) + '%';
+      document.getElementById('predPoints').textContent = p.data_points + ' transactions';
+
+      // Show message if insufficient data
+      const msgEl = document.getElementById('predMsg');
+      if (p.message) {
+        msgEl.textContent = '⚠ ' + p.message;
+        msgEl.style.display = 'block';
+      } else {
+        msgEl.style.display = 'none';
+      }
+
+      showToast('Prediction complete');
+    } catch (err) {
+      showToast('Prediction failed: ' + err.message, 'error');
+    }
+  }
+
+  loadProducts();
+</script>
+</body>
+</html>
